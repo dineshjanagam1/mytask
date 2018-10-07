@@ -8,9 +8,9 @@ class StaffMemberSchedule < Dry::Struct
     # Preconditions:
     # end_of_base_time <= interval
     def interval_to_bitmask interval:, end_of_base_time:
-      interval.try {|a,b|
-        ((1 << ((b-a) / QuantSize).to_i) - 1) <<
-            ((end_of_base_time - b) / QuantSize).to_i }
+        interval.try {|a,b|
+          ((1 << ((b-a) / QuantSize).to_i) - 1) <<
+              ((end_of_base_time - b) / QuantSize).to_i }
     end
 
     def round_down_to_five_minutes time
@@ -37,12 +37,10 @@ class StaffMemberSchedule < Dry::Struct
 
   def initialize *args
     super *args
-    @since = since.beginning_of_day
+    @since = staff_member.timezone.at(since).beginning_of_day
     self.timezone ||= since.time_zone
-    @till  = self.class.round_up_to_five_minutes   till.to_time.in_time_zone(timezone)
+    @till  = self.class.round_up_to_five_minutes till.to_time.in_time_zone(timezone)
   end
-
-
 
   def openings
     return free_slots_chunk.map(&:first)
@@ -82,9 +80,9 @@ class StaffMemberSchedule < Dry::Struct
         map {|e| e.in_time_zone(staff_member.timezone) }.
         flat_map do |staff_member_tz_day|
 
-        a = [staff_member_tz_day.beginning_of_day, staff_member_tz_day + start_hour_offset]
-        b = [staff_member_tz_day + end_hour_offset, staff_member_tz_day.tomorrow.beginning_of_day]
-        [a, b]
+      a = [staff_member_tz_day.beginning_of_day, staff_member_tz_day + start_hour_offset]
+      b = [staff_member_tz_day + end_hour_offset, staff_member_tz_day.tomorrow.beginning_of_day]
+      [a, b]
 
     end.
         reject {|x,y| y < since || x > till }.     # reject non-overlapping intervals
@@ -99,4 +97,39 @@ class StaffMemberSchedule < Dry::Struct
   end
 
 
+  def opening_hours
+    start_time, end_time = start_end_time
+    opening_hours = []
+    while (start_time <= end_time)
+      opening_hours << start_time
+      start_time = start_time + duration
+    end
+    return opening_hours
+  end
+
+  def start_end_time
+    time_periods = staff_member_timezone_interval
+    start_time_hours_minutes, end_time_hours_minutes = time_in_hours_minutes
+    start_time = time_periods.first.change(hour: start_time_hours_minutes[0], minutes: start_time_hours_minutes[1])
+    end_time = time_periods.last.change(hour: end_time_hours_minutes[0], minutes: end_time_hours_minutes[1])
+    return start_time, end_time
+  end
+
+  def working_date
+    staff_member.timezone.at(since)
+  end
+
+  def is_weekend?
+    (working_date.saturday? || working_date.sunday?)
+  end
+
+  def staff_member_timezone_interval
+    [working_date.beginning_of_day, working_date.end_of_day]
+  end
+
+  def time_in_hours_minutes
+    start_hour = is_weekend? ? staff_member.weekend_start_hour : staff_member.start_work_hour
+    end_hour = is_weekend? ? staff_member.weekend_end_hour : staff_member.end_work_hour
+    [start_hour.split(":").map(&:to_i), end_hour.split(":").map(&:to_i)]
+  end
 end
